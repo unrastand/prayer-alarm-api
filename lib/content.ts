@@ -176,9 +176,18 @@ export const VERSES: VerseContent[] = [
 ];
 
 export function getDailyContent(date = new Date()): DailyContent {
-  const key = date.toISOString().slice(0, 10);
+  const key = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
   const idx = Math.abs(hashString(key)) % DEVOTIONS.length;
   return { date: key, ...DEVOTIONS[idx] };
+}
+
+export function getFallbackPiece(dateKey: string, slot: 'morning' | 'evening') {
+  const idx = Math.abs(hashString(`${dateKey}:${slot}`)) % DEVOTIONS.length;
+  return DEVOTIONS[idx];
 }
 
 function hashString(input: string): number {

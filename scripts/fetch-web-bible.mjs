@@ -1,0 +1,166 @@
+/**
+ * Downloads the full public-domain World English Bible into:
+ *   apps/api/data/bible/web/{bookId}.json
+ * and copies the same files into:
+ *   apps/mobile/assets/bible/web/{bookId}.json
+ *
+ * Usage: npm run fetch:web-bible --workspace=@prayer-alarm/web-api
+ */
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const apiRoot = path.join(__dirname, '..');
+const mobileRoot = path.join(apiRoot, '..', 'mobile');
+
+const BOOKS = [
+  ['genesis', 'Genesis', 50],
+  ['exodus', 'Exodus', 40],
+  ['leviticus', 'Leviticus', 27],
+  ['numbers', 'Numbers', 36],
+  ['deuteronomy', 'Deuteronomy', 34],
+  ['joshua', 'Joshua', 24],
+  ['judges', 'Judges', 21],
+  ['ruth', 'Ruth', 4],
+  ['1-samuel', '1 Samuel', 31],
+  ['2-samuel', '2 Samuel', 24],
+  ['1-kings', '1 Kings', 22],
+  ['2-kings', '2 Kings', 25],
+  ['1-chronicles', '1 Chronicles', 29],
+  ['2-chronicles', '2 Chronicles', 36],
+  ['ezra', 'Ezra', 10],
+  ['nehemiah', 'Nehemiah', 13],
+  ['esther', 'Esther', 10],
+  ['job', 'Job', 42],
+  ['psalms', 'Psalms', 150],
+  ['proverbs', 'Proverbs', 31],
+  ['ecclesiastes', 'Ecclesiastes', 12],
+  ['song-of-solomon', 'Song of Solomon', 8],
+  ['isaiah', 'Isaiah', 66],
+  ['jeremiah', 'Jeremiah', 52],
+  ['lamentations', 'Lamentations', 5],
+  ['ezekiel', 'Ezekiel', 48],
+  ['daniel', 'Daniel', 12],
+  ['hosea', 'Hosea', 14],
+  ['joel', 'Joel', 3],
+  ['amos', 'Amos', 9],
+  ['obadiah', 'Obadiah', 1],
+  ['jonah', 'Jonah', 4],
+  ['micah', 'Micah', 7],
+  ['nahum', 'Nahum', 3],
+  ['habakkuk', 'Habakkuk', 3],
+  ['zephaniah', 'Zephaniah', 3],
+  ['haggai', 'Haggai', 2],
+  ['zechariah', 'Zechariah', 14],
+  ['malachi', 'Malachi', 4],
+  ['matthew', 'Matthew', 28],
+  ['mark', 'Mark', 16],
+  ['luke', 'Luke', 24],
+  ['john', 'John', 21],
+  ['acts', 'Acts', 28],
+  ['romans', 'Romans', 16],
+  ['1-corinthians', '1 Corinthians', 16],
+  ['2-corinthians', '2 Corinthians', 13],
+  ['galatians', 'Galatians', 6],
+  ['ephesians', 'Ephesians', 6],
+  ['philippians', 'Philippians', 4],
+  ['colossians', 'Colossians', 4],
+  ['1-thessalonians', '1 Thessalonians', 5],
+  ['2-thessalonians', '2 Thessalonians', 3],
+  ['1-timothy', '1 Timothy', 6],
+  ['2-timothy', '2 Timothy', 4],
+  ['titus', 'Titus', 3],
+  ['philemon', 'Philemon', 1],
+  ['hebrews', 'Hebrews', 13],
+  ['james', 'James', 5],
+  ['1-peter', '1 Peter', 5],
+  ['2-peter', '2 Peter', 3],
+  ['1-john', '1 John', 5],
+  ['2-john', '2 John', 1],
+  ['3-john', '3 John', 1],
+  ['jude', 'Jude', 1],
+  ['revelation', 'Revelation', 22],
+];
+
+const outApi = path.join(apiRoot, 'data', 'bible', 'web');
+const outMobile = path.join(mobileRoot, 'assets', 'bible', 'web');
+fs.mkdirSync(outApi, { recursive: true });
+fs.mkdirSync(outMobile, { recursive: true });
+
+async function fetchChapter(apiName, chapter) {
+  const url = `https://bible-api.com/${encodeURIComponent(`${apiName} ${chapter}`)}?translation=web`;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      const res = await fetch(url);
+      if (res.status === 429) {
+        const wait = 5000 * (attempt + 1);
+        console.warn(`\n429 rate limit — waiting ${wait}ms`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data.verses?.length) throw new Error('empty');
+      return data.verses.map((v) => ({
+        verse: v.verse,
+        text: String(v.text).replace(/\n/g, ' ').trim(),
+      }));
+    } catch (e) {
+      if (attempt === 7) throw e;
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+    }
+  }
+  return [];
+}
+
+async function main() {
+  for (const [bookId, apiName, chapterCount] of BOOKS) {
+    const dest = path.join(outApi, `${bookId}.json`);
+    let existing = { bookId, apiName, chapters: {} };
+    if (fs.existsSync(dest)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(dest, 'utf8'));
+      } catch {
+        // rewrite
+      }
+    }
+    let missing = 0;
+    for (let c = 1; c <= chapterCount; c += 1) {
+      if (existing.chapters?.[String(c)]?.length) continue;
+      missing += 1;
+      process.stdout.write(`\r${bookId} ${c}/${chapterCount}   `);
+      const verses = await fetchChapter(apiName, c);
+      existing.chapters[String(c)] = verses;
+      // persist incrementally
+      fs.writeFileSync(dest, JSON.stringify(existing));
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    fs.copyFileSync(dest, path.join(outMobile, `${bookId}.json`));
+    console.log(`\n${bookId}: done (fetched ${missing} missing chapters)`);
+  }
+  const index = BOOKS.map(([bookId, , chapterCount]) => ({ bookId, chapterCount }));
+  fs.writeFileSync(path.join(outMobile, 'index.json'), JSON.stringify(index));
+  fs.writeFileSync(path.join(outApi, 'index.json'), JSON.stringify(index));
+
+  // Metro-friendly registry of require() loaders for offline WEB in the APK.
+  const registryLines = [
+    '/** Auto-generated by fetch-web-bible.mjs — do not edit by hand. */',
+    'module.exports = {',
+    '  loaders: {',
+    ...BOOKS.map(
+      ([bookId]) =>
+        `    '${bookId}': () => require('./${bookId}.json'),`,
+    ),
+    '  },',
+    '};',
+    '',
+  ];
+  fs.writeFileSync(path.join(outMobile, '_registry.js'), registryLines.join('\n'));
+  console.log('WEB bible dump complete.');
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -1,0 +1,10 @@
+import { VERSES } from '@/lib/content';
+import { json, options } from '@/lib/http';
+
+export function OPTIONS() {
+  return options();
+}
+
+export function GET() {
+  return json(VERSES, 200, null, 600);
+}
